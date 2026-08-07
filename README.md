@@ -1,7 +1,7 @@
 # booster_deploy_cpp
 
 C++ 策略部署程序，将 mjlab 导出的 ONNX 运动策略部署到 Booster K1 机器人（或
-`booster_mujoco` 仿真）上。框架借鉴 [go2_deploy](https://github.com/unitreerobotics/go2_deploy)，
+`booster_mujoco` 仿真）上。框架借鉴 [go2_deploy](https://github.com/lupinjia/go2_deploy)，
 推理使用 **onnxruntime C++ API**；并从 [booster_deploy](https://github.com/booster-robotics)
 （Python 部署栈）借鉴了两个关键设计：
 
