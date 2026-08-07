@@ -1,0 +1,27 @@
+# Booster K1 ONNX policy deployment config
+# Most deployment parameters (joint order, PD gains, default pose, action
+# scale, observation terms/scales/history) are read from the ONNX metadata at
+# runtime; only the values below are supplied here.
+
+policy_name: "2026-08-05_14-32-35_mjlab_k1_walk.onnx"  # relative to ../models or absolute path
+dt: 0.02                                           # policy control period (s), 50Hz
+
+# PD gains for the DAMPING -> STAND transition state
+stand_kp: 60.0
+stand_kd: 5.0
+
+# Fallback PD gains for the CTRL state (overridden by ONNX metadata per-joint
+# joint_stiffness/joint_damping when present)
+ctrl_kp: 20.0
+ctrl_kd: 0.5
+
+# Remote controller watchdog (ms). The real-robot remote only publishes while
+# the joystick/buttons are being used; if no message arrives for this long the
+# command is snapped back to neutral (robot stops). Sim remote (continuous
+# publishing) is unaffected.
+remote_timeout_ms: 100
+
+# DDS
+domain_id: 1        # 1 for sim loopback, 0 for real robot
+interface: "lo"     # network interface; "lo" for local loopback
+remote_controller_topic: "rt/remote_controller_state"  # gamepad state topic
