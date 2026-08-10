@@ -77,6 +77,14 @@ set(LIBTORCH_DIR "$ENV{HOME}/libtorch" CACHE PATH "Path to the LibTorch root")
 list(APPEND CMAKE_PREFIX_PATH "${LIBTORCH_DIR}")
 find_package(Torch REQUIRED)
 
+# ---------------------------------------------------------------
+# OpenVINO (runtime-selectable inference backend; path overridable
+# with -DOPENVINO_DIR=..., default /opt/intel/openvino_2026)
+# ---------------------------------------------------------------
+set(OPENVINO_DIR "/opt/intel/openvino_2026" CACHE PATH "Path to the OpenVINO root")
+list(APPEND CMAKE_PREFIX_PATH "${OPENVINO_DIR}/runtime")
+find_package(OpenVINO REQUIRED COMPONENTS Runtime)
+
 include_directories(
   ${CMAKE_CURRENT_LIST_DIR}/include
   ${BOOSTER_SDK_DIR}/include
@@ -95,14 +103,15 @@ target_link_libraries(booster_deploy_cpp
   yaml-cpp
   spdlog::spdlog
   ${TORCH_LIBRARIES}
+  openvino::runtime
   ${CMAKE_DL_LIBS}
   rt
 )
 
-# make libonnxruntime.so / libtorch_*.so findable at runtime
+# make libonnxruntime.so / libtorch_*.so / libopenvino*.so findable at runtime
 set_target_properties(booster_deploy_cpp PROPERTIES
-  BUILD_RPATH "${ONNXRUNTIME_DIR}/lib/${ONNXRUNTIME_ARCH};${LIBTORCH_DIR}/lib"
-  INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib/${ONNXRUNTIME_ARCH};${LIBTORCH_DIR}/lib"
+  BUILD_RPATH "${ONNXRUNTIME_DIR}/lib/${ONNXRUNTIME_ARCH};${LIBTORCH_DIR}/lib;${OPENVINO_DIR}/runtime/lib/intel64"
+  INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib/${ONNXRUNTIME_ARCH};${LIBTORCH_DIR}/lib;${OPENVINO_DIR}/runtime/lib/intel64"
   INSTALL_RPATH_USE_LINK_PATH TRUE
 )
 

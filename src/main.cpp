@@ -10,6 +10,7 @@
 #include <booster/robot/b1/b1_loco_client.hpp>
 #include <yaml-cpp/yaml.h>
 
+#include "openvino_controller.hpp"
 #include "robot_controller.hpp"
 #include "robot_interface.hpp"
 #include "torch_controller.hpp"
@@ -51,6 +52,10 @@ int main(int argc, char const *argv[])
     if (backend == "torch")
     {
         ctrl = new booster_deploy::K1TorchController(config_file, booster_deploy::k1_joint_names());
+    }
+    else if (backend == "openvino")
+    {
+        ctrl = new booster_deploy::K1OpenVINOController(config_file, booster_deploy::k1_joint_names());
     }
     else
     {

@@ -1,11 +1,13 @@
 # Booster K1 policy deployment config
 #
 # backend selects the inference runtime:
-#   "onnx"  -> K1OnnxController, params read from ONNX metadata_props
-#   "torch" -> K1TorchController, params read from the "torch:" section below
-#              (TorchScript models carry no ONNX metadata)
+#   "onnx"     -> K1OnnxController, params from ONNX metadata_props
+#   "torch"    -> K1TorchController, params from the .onnx metadata, inference
+#                 via the same-basename .pt file (foo.onnx <-> foo.pt)
+#   "openvino" -> K1OpenVINOController, params + inference both on the .onnx
+#                 file, executed by the OpenVINO CPU plugin
 
-backend: "torch"
+backend: "openvino"
 
 policy_name: "2026-08-05_14-32-35_mjlab_k1_walk.onnx"  # relative to ../models or absolute path
 dt: 0.02                                           # policy control period (s), 50Hz
