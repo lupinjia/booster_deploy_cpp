@@ -7,7 +7,7 @@
 #   "openvino" -> K1OpenVINOController, params + inference both on the .onnx
 #                 file, executed by the OpenVINO CPU plugin
 
-backend: "openvino"
+backend: "onnx"
 
 policy_name: "2026-08-05_14-32-35_mjlab_k1_walk.onnx"  # relative to ../models or absolute path
 dt: 0.02                                           # policy control period (s), 50Hz
@@ -26,6 +26,11 @@ ctrl_kd: 0.5
 # command is snapped back to neutral (robot stops). Sim remote (continuous
 # publishing) is unaffected.
 remote_timeout_ms: 100
+
+# Policy-rate data log (50Hz, DataTamer MCAP). Records t, inference_time,
+# joint_pos/joint_vel/feedback_torque, root_* , dof_targets, obs, action.
+# Empty string disables logging; a non-empty value saves to <path>.mcap.
+data_log_path: "../logs/20260810_onnxruntime_infer_time"
 
 # DDS
 domain_id: 1        # 1 for sim loopback, 0 for real robot

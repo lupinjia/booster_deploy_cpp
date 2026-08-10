@@ -8,7 +8,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -25,6 +24,8 @@
 #include <booster/idl/b1/LowState.h>
 #include <booster/idl/b1/RemoteControllerState.h>
 
+#include "conversion.hpp"
+#include "data_logger.hpp"
 #include "gamepad.hpp"
 #include "periodic_task.hpp"
 #include "robot_interface.hpp"
@@ -37,14 +38,9 @@ namespace booster_deploy
 class RobotController
 {
 public:
-    RobotController(const std::string &log_file_name, BasicUserController *ctrl)
-        : ctrl_(ctrl), log_file_(log_file_name)
+    RobotController(BasicUserController *ctrl, const std::string &data_log_path = "")
+        : ctrl_(ctrl), data_log_path_(data_log_path)
     {
-        log_file_ << "state,cmd_lin_x,cmd_lin_y,cmd_ang_z,"
-                     "projected_g0,projected_g1,projected_g2,"
-                     "base_ang_vel_x,base_ang_vel_y,base_ang_vel_z,"
-                     "rpy0,rpy1,rpy2,"
-                     "compute_time_ms" << std::endl;
     }
 
     void loadParam() { ctrl_->loadParam(); }
@@ -70,6 +66,15 @@ public:
 
     void set_remote_topic(const std::string &topic) { remote_topic_ = topic; }
 
+    // Flush and close the MCAP data log (safe to call from a signal handler).
+    void StopLogging()
+    {
+        if (data_logger_)
+        {
+            data_logger_->stop();
+        }
+    }
+
     void StartControl()
     {
         const auto duration = std::chrono::milliseconds(100);
@@ -94,6 +99,15 @@ public:
 
         Damping();
         ctrl_dt_micro_sec_ = static_cast<uint64_t>(ctrl_->dt * 1e6);
+
+        // policy-rate data log (MCAP); disabled when data_log_path_ is empty
+        if (!data_log_path_.empty())
+        {
+            std::string mcap_path = data_log_path_ + ".mcap";
+            data_logger_ = std::make_unique<DataLogger>(
+                mcap_path, static_cast<int>(ctrl_->robot().jpos.size()), ctrl_->obs_dim());
+            std::cout << "Data log enabled: " << mcap_path << std::endl;
+        }
 
         // 50Hz control task
         control_task_ = legged::common::createPeriodicTask(
@@ -122,11 +136,13 @@ protected:
     BasicUserController *ctrl_;
 
     std::mutex state_mutex_, cmd_mutex_;
-    std::ofstream log_file_;
     legged::common::PeriodicTaskPtr control_task_, cmd_task_;
     uint64_t ctrl_dt_micro_sec_ = 20000;
     std::vector<float> compute_time_ms_;
     std::string remote_topic_ = "rt/remote_controller_state";
+    std::string data_log_path_;
+    std::unique_ptr<DataLogger> data_logger_;
+    uint64_t step_count_ = 0;
 
 private:
     // 500Hz: consume low-level robot state
@@ -275,7 +291,7 @@ private:
         float ms = std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count() / 1000.f;
         compute_time_ms_.push_back(ms);
 
-        WriteLog();
+        LogDataStep(ms);
 
         if (compute_time_ms_.size() == 50)
         {
@@ -300,19 +316,41 @@ private:
         }
     }
 
-    void WriteLog()
+    // Record one 50Hz sample to the DataTamer MCAP log (if enabled).
+    void LogDataStep(float compute_time_ms)
     {
-        if (!log_file_.is_open()) return;
+        if (!data_logger_) return;
+
         auto &robot = ctrl_->robot();
-        auto log = ctrl_->GetLog();
-        log_file_ << static_cast<int>(state_machine_.state) << ",";
-        for (size_t i = 0; i < log.size(); ++i)
-            log_file_ << log[i] << (i + 1 < log.size() ? "," : "");
-        log_file_ << "," << robot.projected_gravity[0] << "," << robot.projected_gravity[1]
-                  << "," << robot.projected_gravity[2]
-                  << "," << robot.gyro[0] << "," << robot.gyro[1] << "," << robot.gyro[2]
-                  << "," << robot.rpy[0] << "," << robot.rpy[1] << "," << robot.rpy[2]
-                  << "," << compute_time_ms_.back() << std::endl;
+        int n = static_cast<int>(robot.jpos.size());
+        auto to_double = [](const std::vector<float> &v) {
+            return std::vector<double>(v.begin(), v.end());
+        };
+
+        DataLogSample sample;
+        sample.t = step_count_ * ctrl_->dt;  // sim time: nominal policy period
+        sample.inference_time = compute_time_ms / 1000.0;
+        sample.state = static_cast<double>(state_machine_.state);
+        sample.joint_pos = to_double(robot.jpos);
+        sample.joint_vel = to_double(robot.jvel);
+        sample.feedback_torque = to_double(robot.tau);
+        // no odometry on K1: root_pos_w / root_lin_vel_b stay zero
+        auto quat = euler_to_quat(robot.rpy[0], robot.rpy[1], robot.rpy[2]);
+        for (int i = 0; i < 4; ++i) sample.root_quat_w[i] = quat[i];
+        for (int i = 0; i < 3; ++i) sample.root_ang_vel_b[i] = robot.gyro[i];
+        sample.dof_targets = to_double(robot.jpos_des);
+        if (!ctrl_->last_obs().empty())
+        {
+            sample.obs = to_double(ctrl_->last_obs());
+        }
+        if (!ctrl_->last_action().empty())
+        {
+            sample.action = to_double(ctrl_->last_action());
+        }
+        (void)n;
+
+        data_logger_->log(sample);
+        ++step_count_;
     }
 
     void StandCallback()

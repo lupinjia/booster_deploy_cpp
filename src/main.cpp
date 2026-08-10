@@ -1,9 +1,7 @@
 #include <chrono>
+#include <csignal>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iomanip>
-#include <sstream>
 #include <string>
 
 #include <booster/robot/channel/channel_factory.hpp>
@@ -18,17 +16,19 @@
 
 namespace fs = std::filesystem;
 
+static booster_deploy::RobotController *g_robot_controller = nullptr;
+
+static void handle_signal(int)
+{
+    if (g_robot_controller)
+    {
+        g_robot_controller->StopLogging();
+    }
+    std::exit(0);
+}
+
 int main(int argc, char const *argv[])
 {
-    // ---- log folder (named by start time) ----
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << std::put_time(std::localtime(&time), "%Y%m%d-%H%M%S");
-    fs::path log_folder = fs::current_path() / "logs" / ss.str();
-    fs::create_directories(log_folder);
-    fs::path log_file_name = log_folder / "log.csv";
-
     // ---- DDS domain / interface ----
     // no extra args: local loopback (booster_mujoco sim, domain 1, interface lo)
     // args: <config> <network_interface> (real robot convention: domain 0)
@@ -62,7 +62,14 @@ int main(int argc, char const *argv[])
         ctrl = new booster_deploy::K1OnnxController(config_file, booster_deploy::k1_joint_names());
     }
     std::cout << "Inference backend: " << backend << std::endl;
-    auto *robot_controller = new booster_deploy::RobotController(log_file_name.string(), ctrl);
+
+    // policy-rate data log (DataTamer MCAP); empty string disables it
+    std::string data_log_path = cfg["data_log_path"] ? cfg["data_log_path"].as<std::string>() : "";
+    auto *robot_controller = new booster_deploy::RobotController(ctrl, data_log_path);
+
+    std::signal(SIGINT, handle_signal);
+    std::signal(SIGTERM, handle_signal);
+    g_robot_controller = robot_controller;
     
     std::unique_ptr<booster::robot::b1::B1LocoClient> client;  // 提升到 main 作用域
     if (argc >= 2)

@@ -155,6 +155,7 @@ public:
                       << " != actor_obs_dim " << metadata_->actor_obs_dim << std::endl;
             std::abort();
         }
+        last_obs_ = obs;
 
         // single-input flattened observation (same layout as the ONNX path)
         torch::Tensor input_tensor = torch::zeros({1, static_cast<int64_t>(obs.size())});
@@ -197,15 +198,6 @@ public:
         policy_.forward(policy_input);
     }
 
-    std::vector<float> GetLog() override
-    {
-        std::vector<float> log;
-        log.push_back(obs_builder_->command_[0]);
-        log.push_back(obs_builder_->command_[1]);
-        log.push_back(obs_builder_->command_[2]);
-        return log;
-    }
-
     const std::vector<float> &kp() const override { return kp_; }
     const std::vector<float> &kd() const override { return kd_; }
     float stand_kp() const override { return stand_kp_; }
@@ -214,6 +206,9 @@ public:
 
     BoosterRobotInterface &robot() override { return *robot_; }
     float remote_timeout_ms() const override { return remote_timeout_ms_; }
+    const std::vector<float> &last_obs() const override { return last_obs_; }
+    const std::vector<float> &last_action() const override { return actions_; }
+    int obs_dim() const override { return metadata_->actor_obs_dim; }
 
 private:
     std::string cfg_file_;
@@ -234,6 +229,7 @@ private:
     std::vector<float> stand_pos_real_;
     std::vector<float> kp_, kd_;
     std::vector<float> actions_;
+    std::vector<float> last_obs_;
 };
 
 } // namespace booster_deploy
