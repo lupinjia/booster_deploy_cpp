@@ -33,6 +33,16 @@ public:
     virtual void Calculate() = 0;
     virtual std::vector<float> GetLog() = 0;
 
+    // shared robot interface / deployment params (implemented by each backend)
+    virtual BoosterRobotInterface &robot() = 0;
+    virtual void DummyCalculate() = 0;
+    virtual float stand_kp() const = 0;
+    virtual float stand_kd() const = 0;
+    virtual const std::vector<float> &kp() const = 0;
+    virtual const std::vector<float> &kd() const = 0;
+    virtual const std::vector<float> &stand_pos_real() const = 0;
+    virtual float remote_timeout_ms() const = 0;
+
     void save_jpos(BoosterRobotInterface &robot)
     {
         std::copy(robot.jpos.begin(), robot.jpos.end(), start_pos.begin());
@@ -212,7 +222,7 @@ public:
     }
 
     // apply a zero-observation warmup inference
-    void DummyCalculate()
+    void DummyCalculate() override
     {
         if (!session_ || !metadata_) return;
         std::vector<float> obs(metadata_->actor_obs_dim, 0.f);
@@ -235,14 +245,14 @@ public:
     }
 
     // per-joint PD gains for the CTRL state (real robot order)
-    const std::vector<float> &kp() const { return kp_; }
-    const std::vector<float> &kd() const { return kd_; }
-    float stand_kp() const { return stand_kp_; }
-    float stand_kd() const { return stand_kd_; }
-    const std::vector<float> &stand_pos_real() const { return stand_pos_real_; }
-    float remote_timeout_ms() const { return remote_timeout_ms_; }
+    const std::vector<float> &kp() const override { return kp_; }
+    const std::vector<float> &kd() const override { return kd_; }
+    float stand_kp() const override { return stand_kp_; }
+    float stand_kd() const override { return stand_kd_; }
+    const std::vector<float> &stand_pos_real() const override { return stand_pos_real_; }
 
-    BoosterRobotInterface &robot() { return *robot_; }
+    BoosterRobotInterface &robot() override { return *robot_; }
+    float remote_timeout_ms() const override { return remote_timeout_ms_; }
 
 private:
     std::string cfg_file_;

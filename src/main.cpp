@@ -8,9 +8,11 @@
 
 #include <booster/robot/channel/channel_factory.hpp>
 #include <booster/robot/b1/b1_loco_client.hpp>
+#include <yaml-cpp/yaml.h>
 
 #include "robot_controller.hpp"
 #include "robot_interface.hpp"
+#include "torch_controller.hpp"
 #include "user_controller.hpp"
 
 namespace fs = std::filesystem;
@@ -38,11 +40,23 @@ int main(int argc, char const *argv[])
         booster::robot::ChannelFactory::Instance()->Init(0, argv[1]);
     }
 
-    // ---- controller ----
+    // ---- controller (backend selected at runtime from the config yaml) ----
     fs::path param_folder = fs::current_path() / "../params";
     std::string config_file = (param_folder / "k1_config.yaml").string();
 
-    auto *ctrl = new booster_deploy::K1OnnxController(config_file, booster_deploy::k1_joint_names());
+    YAML::Node cfg = YAML::LoadFile(config_file);
+    std::string backend = cfg["backend"] ? cfg["backend"].as<std::string>() : "onnx";
+
+    booster_deploy::BasicUserController *ctrl = nullptr;
+    if (backend == "torch")
+    {
+        ctrl = new booster_deploy::K1TorchController(config_file, booster_deploy::k1_joint_names());
+    }
+    else
+    {
+        ctrl = new booster_deploy::K1OnnxController(config_file, booster_deploy::k1_joint_names());
+    }
+    std::cout << "Inference backend: " << backend << std::endl;
     auto *robot_controller = new booster_deploy::RobotController(log_file_name.string(), ctrl);
     
     std::unique_ptr<booster::robot::b1::B1LocoClient> client;  // 提升到 main 作用域

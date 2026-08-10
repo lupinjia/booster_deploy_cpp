@@ -69,10 +69,19 @@ endif()
 find_package(yaml-cpp REQUIRED)
 find_package(spdlog REQUIRED)
 
+# ---------------------------------------------------------------
+# LibTorch (runtime-selectable inference backend; path overridable
+# with -DLIBTORCH_DIR=...)
+# ---------------------------------------------------------------
+set(LIBTORCH_DIR "$ENV{HOME}/libtorch" CACHE PATH "Path to the LibTorch root")
+list(APPEND CMAKE_PREFIX_PATH "${LIBTORCH_DIR}")
+find_package(Torch REQUIRED)
+
 include_directories(
   ${CMAKE_CURRENT_LIST_DIR}/include
   ${BOOSTER_SDK_DIR}/include
   ${ONNXRUNTIME_DIR}/include/core/session
+  ${TORCH_INCLUDE_DIRS}
 )
 
 add_executable(booster_deploy_cpp
@@ -85,14 +94,15 @@ target_link_libraries(booster_deploy_cpp
   ${ONNXRUNTIME_LIBRARY}
   yaml-cpp
   spdlog::spdlog
+  ${TORCH_LIBRARIES}
   ${CMAKE_DL_LIBS}
   rt
 )
 
-# make libonnxruntime.so findable at runtime from the vendored lib dir
+# make libonnxruntime.so / libtorch_*.so findable at runtime
 set_target_properties(booster_deploy_cpp PROPERTIES
-  BUILD_RPATH "${ONNXRUNTIME_DIR}/lib/${ONNXRUNTIME_ARCH}"
-  INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib/${ONNXRUNTIME_ARCH}"
+  BUILD_RPATH "${ONNXRUNTIME_DIR}/lib/${ONNXRUNTIME_ARCH};${LIBTORCH_DIR}/lib"
+  INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib/${ONNXRUNTIME_ARCH};${LIBTORCH_DIR}/lib"
   INSTALL_RPATH_USE_LINK_PATH TRUE
 )
 

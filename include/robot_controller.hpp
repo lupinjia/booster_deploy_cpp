@@ -37,7 +37,7 @@ namespace booster_deploy
 class RobotController
 {
 public:
-    RobotController(const std::string &log_file_name, K1OnnxController *ctrl)
+    RobotController(const std::string &log_file_name, BasicUserController *ctrl)
         : ctrl_(ctrl), log_file_(log_file_name)
     {
         log_file_ << "state,cmd_lin_x,cmd_lin_y,cmd_ang_z,"
@@ -119,7 +119,7 @@ protected:
     booster_interface::msg::LowCmd cmd_;
     Gamepad gamepad_;
     SimpleStateMachine state_machine_;
-    K1OnnxController *ctrl_;
+    BasicUserController *ctrl_;
 
     std::mutex state_mutex_, cmd_mutex_;
     std::ofstream log_file_;

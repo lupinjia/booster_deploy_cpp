@@ -1,7 +1,11 @@
-# Booster K1 ONNX policy deployment config
-# Most deployment parameters (joint order, PD gains, default pose, action
-# scale, observation terms/scales/history) are read from the ONNX metadata at
-# runtime; only the values below are supplied here.
+# Booster K1 policy deployment config
+#
+# backend selects the inference runtime:
+#   "onnx"  -> K1OnnxController, params read from ONNX metadata_props
+#   "torch" -> K1TorchController, params read from the "torch:" section below
+#              (TorchScript models carry no ONNX metadata)
+
+backend: "torch"
 
 policy_name: "2026-08-05_14-32-35_mjlab_k1_walk.onnx"  # relative to ../models or absolute path
 dt: 0.02                                           # policy control period (s), 50Hz
@@ -25,3 +29,11 @@ remote_timeout_ms: 100
 domain_id: 1        # 1 for sim loopback, 0 for real robot
 interface: "lo"     # network interface; "lo" for local loopback
 remote_controller_topic: "rt/remote_controller_state"  # gamepad state topic
+
+# ---------------------------------------------------------------------------
+# LibTorch backend (used only when backend: "torch")
+# The .pt model must share the basename of policy_name above (e.g.
+# "policy.onnx" <-> "policy.pt" in ../models). All deployment parameters
+# (joint order, PD gains, default pose, action scale, obs terms) are read
+# from the .onnx metadata_props, exactly like the ONNX backend.
+# ---------------------------------------------------------------------------
