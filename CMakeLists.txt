@@ -137,3 +137,9 @@ target_link_libraries(virtual_remote
   ${CMAKE_DL_LIBS}
   rt
 )
+
+# standalone local-joystick value dump tool (no SDK/onnxruntime needed)
+add_executable(joystick_test tools/joystick_test.cpp)
+target_link_libraries(joystick_test
+  pthread
+)

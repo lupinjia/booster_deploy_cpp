@@ -50,6 +50,15 @@ int main(int argc, char const *argv[])
     std::string data_log_path = cfg["data_log_path"] ? cfg["data_log_path"].as<std::string>() : "";
     auto *robot_controller = new booster_deploy::RobotController(ctrl, data_log_path);
 
+    // real robot (argc >= 2): read the local joystick device directly instead
+    // of the DDS remote_controller_state topic; simulation (no args) keeps the
+    // DDS subscription.
+    robot_controller->set_use_local_joystick(argc >= 2);
+    if (cfg["joystick_device"])
+    {
+        robot_controller->set_joystick_device(cfg["joystick_device"].as<std::string>());
+    }
+
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
     g_robot_controller = robot_controller;

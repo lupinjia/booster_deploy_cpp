@@ -40,7 +40,6 @@ public:
     virtual const std::vector<float> &kp() const = 0;
     virtual const std::vector<float> &kd() const = 0;
     virtual const std::vector<float> &stand_pos_real() const = 0;
-    virtual float remote_timeout_ms() const = 0;
 
     // last policy step outputs (for data logging; empty until first Calculate)
     virtual const std::vector<float> &last_obs() const = 0;
@@ -86,7 +85,6 @@ public:
             stand_kd_ = cfg["stand_kd"].as<float>();
             ctrl_kp_fallback_ = cfg["ctrl_kp"].as<float>();
             ctrl_kd_fallback_ = cfg["ctrl_kd"].as<float>();
-            remote_timeout_ms_ = cfg["remote_timeout_ms"].as<float>(100.f);
         }
         catch (const std::exception &e)
         {
@@ -246,7 +244,6 @@ public:
     float stand_kp() const override { return stand_kp_; }
     float stand_kd() const override { return stand_kd_; }
     const std::vector<float> &stand_pos_real() const override { return stand_pos_real_; }
-    float remote_timeout_ms() const override { return remote_timeout_ms_; }
 
     BoosterRobotInterface &robot() override { return *robot_; }
     const std::vector<float> &last_obs() const override { return last_obs_; }
@@ -260,7 +257,6 @@ private:
     std::string policy_name_;
     float stand_kp_ = 60.f, stand_kd_ = 5.f;
     float ctrl_kp_fallback_ = 20.f, ctrl_kd_fallback_ = 0.5f;
-    float remote_timeout_ms_ = 100.f;  // watchdog: stop if remote silent this long
 
     std::unique_ptr<Ort::Env> env_;
     std::unique_ptr<Ort::Session> session_;

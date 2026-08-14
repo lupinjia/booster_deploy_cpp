@@ -27,6 +27,7 @@
 #include "conversion.hpp"
 #include "data_logger.hpp"
 #include "gamepad.hpp"
+#include "local_joystick.hpp"
 #include "periodic_task.hpp"
 #include "robot_interface.hpp"
 #include "state_machine.hpp"
@@ -53,18 +54,30 @@ public:
         lowstate_subscriber = std::make_shared<booster::robot::ChannelSubscriber<booster_interface::msg::LowState>>(
             booster::robot::b1::kTopicLowState,
             std::bind(&RobotController::LowStateMessageHandler, this, std::placeholders::_1));
-        remote_subscriber = std::make_shared<booster::robot::ChannelSubscriber<booster_interface::msg::RemoteControllerState>>(
-            remote_topic_,
-            std::bind(&RobotController::RemoteControllerMessageHandler, this, std::placeholders::_1));
+        if (!use_local_joystick_)
+        {
+            remote_subscriber = std::make_shared<booster::robot::ChannelSubscriber<booster_interface::msg::RemoteControllerState>>(
+                remote_topic_,
+                std::bind(&RobotController::RemoteControllerMessageHandler, this, std::placeholders::_1));
+        }
 
         lowcmd_publisher->InitChannel();
         lowstate_subscriber->InitChannel();
-        remote_subscriber->InitChannel();
+        if (remote_subscriber)
+        {
+            remote_subscriber->InitChannel();
+        }
 
         init_low_cmd();
     }
 
     void set_remote_topic(const std::string &topic) { remote_topic_ = topic; }
+
+    // Real-robot mode: read the local joystick device directly instead of
+    // subscribing to the DDS remote_controller_state topic.  Chosen by main()
+    // based on argc (argc >= 2 => real robot).
+    void set_use_local_joystick(bool use) { use_local_joystick_ = use; }
+    void set_joystick_device(const std::string &dev) { joystick_device_ = dev; }
 
     // Flush and close the MCAP data log (safe to call from a signal handler).
     void StopLogging()
@@ -78,6 +91,23 @@ public:
     void StartControl()
     {
         const auto duration = std::chrono::milliseconds(100);
+
+        // real-robot: poll the local joystick device (before waiting for START,
+        // since the START button itself comes from this device)
+        if (use_local_joystick_)
+        {
+            local_joystick_ = std::make_unique<LocalJoystick>(joystick_device_);
+            if (!local_joystick_->open())
+            {
+                std::cerr << "[robot_controller] cannot open joystick device "
+                          << joystick_device_ << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
+            std::cout << "Local joystick: " << local_joystick_->deviceName() << std::endl;
+            joystick_task_ = legged::common::createPeriodicTask(
+                "LocalJoystick", joystick_poll_us_,
+                std::bind(&RobotController::LocalJoystickStep, this), -1, SCHED_OTHER, 20);
+        }
 
         // wait for the gamepad START button to begin
         std::cout << "Press START button to start!" << std::endl;
@@ -136,13 +166,17 @@ protected:
     BasicUserController *ctrl_;
 
     std::mutex state_mutex_, cmd_mutex_;
-    legged::common::PeriodicTaskPtr control_task_, cmd_task_;
+    legged::common::PeriodicTaskPtr control_task_, cmd_task_, joystick_task_;
     uint64_t ctrl_dt_micro_sec_ = 20000;
     std::vector<float> compute_time_ms_;
     std::string remote_topic_ = "rt/remote_controller_state";
     std::string data_log_path_;
     std::unique_ptr<DataLogger> data_logger_;
     uint64_t step_count_ = 0;
+    bool use_local_joystick_ = false;
+    std::string joystick_device_ = "/dev/input/js0";
+    float joystick_poll_us_ = 10000.0f;  // 100Hz device polling
+    std::unique_ptr<LocalJoystick> local_joystick_;
 
 private:
     // 500Hz: consume low-level robot state
@@ -164,13 +198,44 @@ private:
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             gamepad_.set_raw(*remote);
-            last_remote_msg_time_ = std::chrono::steady_clock::now();
             ++remote_frame_count_;
         }
     }
 
+    // Real-robot: poll the local joystick device and feed the gamepad with the
+    // same RemoteControllerState semantics.  If the device is gone (unplugged),
+    // keep the last known state (no new commands arrive).
+    void LocalJoystickStep()
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (!local_joystick_ || !local_joystick_->poll())
+        {
+            return;
+        }
+        booster_interface::msg::RemoteControllerState remote;
+        remote.lx(local_joystick_->lx());
+        remote.ly(local_joystick_->ly());
+        remote.rx(local_joystick_->rx());
+        remote.ry(local_joystick_->ry());
+        remote.a(local_joystick_->a());
+        remote.b(local_joystick_->b());
+        remote.x(local_joystick_->x());
+        remote.y(local_joystick_->y());
+        remote.lb(local_joystick_->lb());
+        remote.rb(local_joystick_->rb());
+        remote.back(local_joystick_->back());
+        remote.start(local_joystick_->start());
+        remote.lt(local_joystick_->lt());
+        remote.rt(local_joystick_->rt());
+        remote.hat_u(local_joystick_->hatUp());
+        remote.hat_d(local_joystick_->hatDown());
+        remote.hat_l(local_joystick_->hatLeft());
+        remote.hat_r(local_joystick_->hatRight());
+        gamepad_.set_raw(remote);
+        ++remote_frame_count_;
+    }
+
     std::atomic<uint64_t> remote_frame_count_{0};
-    std::chrono::steady_clock::time_point last_remote_msg_time_{std::chrono::steady_clock::now()};
 
     void init_low_cmd()
     {
@@ -205,18 +270,10 @@ private:
         }
     }
 
-    // Tick the gamepad under the state mutex.  If the remote has been silent
-    // for longer than the watchdog timeout (real-robot remote only publishes
-    // while being used), snap the gamepad back to neutral so a released
-    // joystick stops the robot instead of persisting the last command.
+    // Tick the gamepad under the state mutex.
     void TickGamepad()
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
-        if (std::chrono::steady_clock::now() - last_remote_msg_time_ >
-            std::chrono::milliseconds(static_cast<int>(ctrl_->remote_timeout_ms())))
-        {
-            gamepad_.set_idle();
-        }
         gamepad_.tick();
     }
 

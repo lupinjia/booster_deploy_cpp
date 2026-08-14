@@ -39,7 +39,6 @@ public:
     // states.  Edge detection is deferred to tick().
     void set_raw(const booster_interface::msg::RemoteControllerState &key)
     {
-        idle_ = false;
         lx = smooth_axis(lx, key.lx());
         ly = smooth_axis(ly, key.ly());
         rx = smooth_axis(rx, key.rx());
@@ -52,27 +51,10 @@ public:
         raw_down = key.hat_d(); raw_left = key.hat_l();
     }
 
-    // Mark the remote as silent.  The real-robot remote only publishes while
-    // the joystick/buttons are being used; once it goes silent the last
-    // command value would otherwise persist forever.  The controller calls
-    // this when no remote message has arrived for longer than the watchdog
-    // timeout; the next tick() then snaps the gamepad back to neutral so the
-    // robot stops.
-    void set_idle() { idle_ = true; }
-
     // Called at the control rate: computes button edges from the latest raw
     // states so on_press/on_release are observable by the control loop.
     void tick()
     {
-        if (idle_)
-        {
-            lx = ly = rx = ry = 0.f;
-            rb.update(false); lb.update(false); start.update(false); back.update(false);
-            rt.update(false); lt.update(false); a.update(false); b.update(false);
-            x.update(false); y.update(false); up.update(false); right.update(false);
-            down.update(false); left.update(false);
-            return;
-        }
         rb.update(raw_rb);
         lb.update(raw_lb);
         start.update(raw_start);
@@ -97,7 +79,6 @@ public:
     Button rb, lb, start, back, rt, lt, a, b, x, y, up, right, down, left;
 
 private:
-    bool idle_ = false;
     bool raw_rb = false, raw_lb = false, raw_start = false, raw_back = false;
     bool raw_rt = false, raw_lt = false, raw_a = false, raw_b = false;
     bool raw_x = false, raw_y = false, raw_up = false, raw_right = false;

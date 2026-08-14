@@ -3,7 +3,7 @@
 # scale, observation terms/scales/history) are read from the ONNX metadata at
 # runtime; only the values below are supplied here.
 
-policy_name: "2026-08-13_23-31-27.onnx"  # relative to ../models or absolute path
+policy_name: "2026-08-14_13-20-42.onnx"  # relative to ../models or absolute path
 dt: 0.02                                           # policy control period (s), 50Hz
 
 # PD gains for the DAMPING -> STAND transition state
@@ -15,12 +15,6 @@ stand_kd: 5.0
 ctrl_kp: 20.0
 ctrl_kd: 0.5
 
-# Remote controller watchdog (ms). The real-robot remote only publishes while
-# the joystick/buttons are being used; if no message arrives for this long the
-# command is snapped back to neutral (robot stops). Sim remote (continuous
-# publishing) is unaffected.
-remote_timeout_ms: 100
-
 # Policy-rate data log (50Hz, DataTamer MCAP). Records t, inference_time,
 # joint_pos/joint_vel/feedback_torque, root_* , dof_targets, obs, action.
 # Empty string disables logging; a non-empty value saves to <path>.mcap.
@@ -29,4 +23,8 @@ data_log_path: "../logs/k1_policy"
 # DDS
 domain_id: 1        # 1 for sim loopback, 0 for real robot
 interface: "lo"     # network interface; "lo" for local loopback
-remote_controller_topic: "rt/remote_controller_state"  # gamepad state topic
+remote_controller_topic: "rt/remote_controller_state"  # gamepad state topic (sim only)
+
+# Real-robot local joystick device (used when running with an argument,
+# i.e. real robot; sim mode still subscribes to remote_controller_topic)
+joystick_device: "/dev/input/js0"
