@@ -31,7 +31,21 @@ public:
     virtual void reset(BoosterRobotInterface &robot) = 0;
     virtual void GetInput(BoosterRobotInterface &robot, Gamepad &gamepad) = 0;
     virtual void Calculate() = 0;
-    virtual std::vector<float> GetLog() = 0;
+
+    // shared robot interface / deployment params (implemented by each backend)
+    virtual BoosterRobotInterface &robot() = 0;
+    virtual void DummyCalculate() = 0;
+    virtual float stand_kp() const = 0;
+    virtual float stand_kd() const = 0;
+    virtual const std::vector<float> &kp() const = 0;
+    virtual const std::vector<float> &kd() const = 0;
+    virtual const std::vector<float> &stand_pos_real() const = 0;
+    virtual float remote_timeout_ms() const = 0;
+
+    // last policy step outputs (for data logging; empty until first Calculate)
+    virtual const std::vector<float> &last_obs() const = 0;
+    virtual const std::vector<float> &last_action() const = 0;
+    virtual int obs_dim() const = 0;
 
     void save_jpos(BoosterRobotInterface &robot)
     {
@@ -182,6 +196,7 @@ public:
                       << " != actor_obs_dim " << metadata_->actor_obs_dim << std::endl;
             std::abort();
         }
+        last_obs_ = obs;
 
         // ---- inference ----
         auto mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
@@ -212,7 +227,7 @@ public:
     }
 
     // apply a zero-observation warmup inference
-    void DummyCalculate()
+    void DummyCalculate() override
     {
         if (!session_ || !metadata_) return;
         std::vector<float> obs(metadata_->actor_obs_dim, 0.f);
@@ -225,24 +240,18 @@ public:
         session_->Run(Ort::RunOptions{nullptr}, input_names, &input_tensor, 1, output_names, 1);
     }
 
-    std::vector<float> GetLog() override
-    {
-        std::vector<float> log;
-        log.push_back(obs_builder_->command_[0]);
-        log.push_back(obs_builder_->command_[1]);
-        log.push_back(obs_builder_->command_[2]);
-        return log;
-    }
-
     // per-joint PD gains for the CTRL state (real robot order)
-    const std::vector<float> &kp() const { return kp_; }
-    const std::vector<float> &kd() const { return kd_; }
-    float stand_kp() const { return stand_kp_; }
-    float stand_kd() const { return stand_kd_; }
-    const std::vector<float> &stand_pos_real() const { return stand_pos_real_; }
-    float remote_timeout_ms() const { return remote_timeout_ms_; }
+    const std::vector<float> &kp() const override { return kp_; }
+    const std::vector<float> &kd() const override { return kd_; }
+    float stand_kp() const override { return stand_kp_; }
+    float stand_kd() const override { return stand_kd_; }
+    const std::vector<float> &stand_pos_real() const override { return stand_pos_real_; }
+    float remote_timeout_ms() const override { return remote_timeout_ms_; }
 
-    BoosterRobotInterface &robot() { return *robot_; }
+    BoosterRobotInterface &robot() override { return *robot_; }
+    const std::vector<float> &last_obs() const override { return last_obs_; }
+    const std::vector<float> &last_action() const override { return actions_; }
+    int obs_dim() const override { return metadata_->actor_obs_dim; }
 
 private:
     std::string cfg_file_;
@@ -265,6 +274,7 @@ private:
     std::vector<float> stand_pos_real_;
     std::vector<float> kp_, kd_;
     std::vector<float> actions_;
+    std::vector<float> last_obs_;
 };
 
 } // namespace booster_deploy

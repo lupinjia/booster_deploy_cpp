@@ -69,10 +69,40 @@ endif()
 find_package(yaml-cpp REQUIRED)
 find_package(spdlog REQUIRED)
 
+# ---------------------------------------------------------------
+# DataTamer (policy-rate MCAP data log; vendored in third_party/data_tamer)
+# Arch-specific static libs: lib/<arch>/, selected by CMAKE_SYSTEM_PROCESSOR
+# (same scheme as onnxruntime above).
+# ---------------------------------------------------------------
+set(DATA_TAMER_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/data_tamer" CACHE PATH "Path to the DataTamer install prefix")
+
+set(DATA_TAMER_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+if(NOT DATA_TAMER_ARCH)
+    execute_process(
+        COMMAND uname -m
+        OUTPUT_VARIABLE DATA_TAMER_ARCH
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+endif()
+if(DATA_TAMER_ARCH MATCHES "^(AMD64|amd64|x86_64)$")
+    set(DATA_TAMER_ARCH x86_64)
+elseif(DATA_TAMER_ARCH MATCHES "^(aarch64|arm64)$")
+    set(DATA_TAMER_ARCH arm64)
+else()
+    message(FATAL_ERROR "Unsupported DataTamer architecture: ${DATA_TAMER_ARCH}")
+endif()
+
+set(DATA_TAMER_LIBRARY "${DATA_TAMER_DIR}/lib/${DATA_TAMER_ARCH}/libdata_tamer.a")
+set(DATA_TAMER_MCAP_LIBRARY "${DATA_TAMER_DIR}/lib/${DATA_TAMER_ARCH}/libmcap_lib.a")
+if(NOT EXISTS "${DATA_TAMER_LIBRARY}")
+    message(FATAL_ERROR "DataTamer library not found: ${DATA_TAMER_LIBRARY} (build it for ${DATA_TAMER_ARCH}; see third_party/data_tamer/lib/${DATA_TAMER_ARCH}/README.md)")
+endif()
+message(STATUS "DataTamer architecture: ${DATA_TAMER_ARCH}")
+
 include_directories(
   ${CMAKE_CURRENT_LIST_DIR}/include
   ${BOOSTER_SDK_DIR}/include
   ${ONNXRUNTIME_DIR}/include/core/session
+  ${DATA_TAMER_DIR}/include
 )
 
 add_executable(booster_deploy_cpp
@@ -85,6 +115,10 @@ target_link_libraries(booster_deploy_cpp
   ${ONNXRUNTIME_LIBRARY}
   yaml-cpp
   spdlog::spdlog
+  ${DATA_TAMER_LIBRARY}
+  ${DATA_TAMER_MCAP_LIBRARY}
+  zstd
+  lz4
   ${CMAKE_DL_LIBS}
   rt
 )
