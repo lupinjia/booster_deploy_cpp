@@ -3,7 +3,7 @@
 # scale, observation terms/scales/history) are read from the ONNX metadata at
 # runtime; only the values below are supplied here.
 
-policy_name: "2026-08-14_13-20-42.onnx"  # relative to ../models or absolute path
+policy_name: "k1_walk_amp.onnx"  # relative to ../models or absolute path
 dt: 0.02                                           # policy control period (s), 50Hz
 
 # PD gains for the DAMPING -> STAND transition state
