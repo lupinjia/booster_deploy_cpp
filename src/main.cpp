@@ -2,6 +2,7 @@
 #include <csignal>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 
 #include <booster/robot/channel/channel_factory.hpp>
@@ -14,6 +15,10 @@
 
 namespace fs = std::filesystem;
 
+// FastDDS profile used by the on-robot booster services.
+static constexpr const char *kRealDdsProfile =
+    "/opt/booster/config/dds_configs/single-board_configs/fastdds_profile.xml";
+
 static booster_deploy::RobotController *g_robot_controller = nullptr;
 
 static void handle_signal(int)
@@ -25,18 +30,56 @@ static void handle_signal(int)
     std::exit(0);
 }
 
+static void print_usage(const char *argv0)
+{
+    std::cout << "Usage: " << argv0 << " [real|sim]\n"
+              << "  real (default): domain 0 via InitWithConfigPath(0, " << kRealDdsProfile << ")\n"
+              << "  sim           : domain 1, interface lo (booster_mujoco)\n";
+}
+
 int main(int argc, char const *argv[])
 {
-    // ---- DDS domain / interface ----
-    // no extra args: local loopback (booster_mujoco sim, domain 1, interface lo)
-    // args: <config> <network_interface> (real robot convention: domain 0)
-    if (argc < 2)
+    // ---- DDS mode ----
+    // real (default): domain 0, fastdds_profile.xml (booster_camera uses SHM+UDP)
+    // sim           : domain 1, interface lo
+    bool is_real = true;
+    if (argc >= 2)
     {
-        booster::robot::ChannelFactory::Instance()->Init(1, "lo");
+        const std::string mode = argv[1];
+        if (mode == "real" || mode == "--real")
+        {
+            is_real = true;
+        }
+        else if (mode == "sim" || mode == "--sim")
+        {
+            is_real = false;
+        }
+        else
+        {
+            print_usage(argv[0]);
+            return 1;
+        }
+        if (argc > 2)
+        {
+            print_usage(argv[0]);
+            return 1;
+        }
+    }
+
+    if (is_real)
+    {
+        if (!fs::exists(kRealDdsProfile))
+        {
+            std::cerr << "real-robot DDS profile not found: " << kRealDdsProfile << "\n";
+            return 1;
+        }
+        booster::robot::ChannelFactory::Instance()->InitWithConfigPath(0, kRealDdsProfile);
+        std::cout << "[booster_deploy] mode=real (domain 0, profile " << kRealDdsProfile << ")\n";
     }
     else
     {
-        booster::robot::ChannelFactory::Instance()->Init(0, argv[1]);
+        booster::robot::ChannelFactory::Instance()->Init(1, "lo");
+        std::cout << "[booster_deploy] mode=sim (domain 1, interface lo)\n";
     }
 
     // ---- controller ----
@@ -50,10 +93,9 @@ int main(int argc, char const *argv[])
     std::string data_log_path = cfg["data_log_path"] ? cfg["data_log_path"].as<std::string>() : "";
     auto *robot_controller = new booster_deploy::RobotController(ctrl, data_log_path);
 
-    // real robot (argc >= 2): read the local joystick device directly instead
-    // of the DDS remote_controller_state topic; simulation (no args) keeps the
-    // DDS subscription.
-    robot_controller->set_use_local_joystick(argc >= 2);
+    // real: read the local joystick device directly instead of the DDS
+    // remote_controller_state topic; sim keeps the DDS subscription.
+    robot_controller->set_use_local_joystick(is_real);
     if (cfg["joystick_device"])
     {
         robot_controller->set_joystick_device(cfg["joystick_device"].as<std::string>());
@@ -64,7 +106,7 @@ int main(int argc, char const *argv[])
     g_robot_controller = robot_controller;
     
     std::unique_ptr<booster::robot::b1::B1LocoClient> client;  // 提升到 main 作用域
-    if (argc >= 2)
+    if (is_real)
     {
         client = std::make_unique<booster::robot::b1::B1LocoClient>();
         client->Init();

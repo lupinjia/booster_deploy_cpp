@@ -68,6 +68,7 @@ endif()
 
 find_package(yaml-cpp REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # ---------------------------------------------------------------
 # DataTamer (policy-rate MCAP data log; vendored in third_party/data_tamer)
@@ -142,4 +143,15 @@ target_link_libraries(virtual_remote
 add_executable(joystick_test tools/joystick_test.cpp)
 target_link_libraries(joystick_test
   pthread
+)
+
+# depth image recorder: subscribe to rt/depthimage and save PNG frames at a
+# fixed rate (default 16.6 Hz); see tools/depth_recorder.cpp for usage
+add_executable(depth_recorder tools/depth_recorder.cpp)
+target_link_libraries(depth_recorder
+  pthread
+  ${BOOSTER_SDK_LIBRARY}
+  ZLIB::ZLIB
+  ${CMAKE_DL_LIBS}
+  rt
 )

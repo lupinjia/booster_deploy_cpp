@@ -51,7 +51,8 @@ booster_deploy_cpp/
 ├── third_party/onnxruntime/      # 本地化 onnxruntime C++ SDK（头文件 + lib）
 └── tools/
     ├── virtual_remote.cpp        # 无手柄集成测试工具（仿真发布脚本化手柄状态）
-    └── joystick_test.cpp         # 本地手柄设备值读取测试工具
+    ├── joystick_test.cpp         # 本地手柄设备值读取测试工具
+    └── depth_recorder.cpp        # 深度图录制工具（16.6Hz 存 PNG；真机 rt/boostercamera/head/depth）
 ```
 
 ## DDS 通信（与 booster_mujoco 对接）
@@ -70,24 +71,29 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
-依赖：booster_robotics_sdk（静态库）、onnxruntime（已随项目附带）、yaml-cpp、spdlog。
+依赖：booster_robotics_sdk（静态库）、onnxruntime（已随项目附带）、yaml-cpp、spdlog、zlib。
 
 ## 运行
 
+DDS 初始化方式由位置参数决定（默认 real）：
+
 ```bash
-# DDS 需要加载 FastDDS 配置文件（与 booster_mujoco 一致）
-export BOOSTER_FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/booster_mujoco/fastdds_profile.xml
-
-# 仿真联调（本地回环，domain 1，interface lo；手柄状态来自 DDS topic）
+# 真机（默认）：domain 0，InitWithConfigPath(fastdds_profile.xml)；
+# 直接读本地手柄设备 /dev/input/js0
 ./build/booster_deploy_cpp
+./build/booster_deploy_cpp real
 
-# 真机（domain 0，interface 由参数指定；直接读本地手柄设备 /dev/input/js0）
-./build/booster_deploy_cpp lo
+# 仿真联调：domain 1，interface lo；手柄状态来自 DDS topic
+./build/booster_deploy_cpp sim
 ```
+
+真机模式使用机器人上的
+`/opt/booster/config/dds_configs/single-board_configs/fastdds_profile.xml`
+（booster_camera 等容器服务也用该 profile，普通 UDP-only 参与者匹配不到相机话题）。
 
 ### 仿真 vs 真机的遥控器处理
 
-| | 仿真（无参数） | 真机（带参数，argc >= 2） |
+| | 仿真（`sim`） | 真机（`real`，默认） |
 |---|---|---|
 | 手柄来源 | 订阅 DDS `rt/remote_controller_state`（booster_mujoco 持续发布） | **直接读本地手柄设备**（`/dev/input/js0`，`joystick_device` 可配置） |
 | 设备路径 | - | `/dev/input/js0` |
@@ -100,12 +106,11 @@ export BOOSTER_FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/booster_mujoco/fastdds_pr
 
 ### 真机运行要点（实机调试经验）
 
-- **DDS 参数：domain_id = 0、interface = lo**。程序不带参数运行时走仿真约定
-  （domain 1 + lo，手柄走 DDS）；带参数运行时走真机约定（domain 0 + 参数指定的
-  网卡，手柄走本地设备直读）。
+- **DDS**：真机模式固定 `InitWithConfigPath(0, fastdds_profile.xml)`；仿真模式固定
+  `Init(1, "lo")`。不再通过 interface 名称切换仿真/真机。
 - **需要先进入 Custom 模式**：真机上 `rt/joint_ctrl` 命令只有在 Custom 模式下才生效。
-  带参数运行（如 `./booster_deploy_cpp lo`）时程序会自动调用
-  `B1LocoClient::ChangeMode(kCustom)` 切换；若失败会打印 `ChangeMode failed` 并退出。
+  真机模式（`real`）下程序会自动调用 `B1LocoClient::ChangeMode(kCustom)` 切换；
+  若失败会打印 `ChangeMode failed` 并退出。
 - **手柄设备直读**：真机模式打开 `params/k1_config.yaml` 中 `joystick_device`
   指定的设备（默认 `/dev/input/js0`），以 100Hz 轮询并映射为与仿真相同的
   `RemoteControllerState` 语义。设备打开失败会报错退出；运行中设备拔出则保留
@@ -158,6 +163,68 @@ cd booster_deploy_cpp/build
 
 `virtual_remote` 发布脚本化的 RemoteControllerState 序列，用于端到端验证
 状态机流转与策略推理。注意 DDS 发现需要数秒，请等待部署程序就绪后再操作。
+
+## 深度图录制（depth_recorder）
+
+`tools/depth_recorder.cpp` 订阅深度图话题（`sensor_msgs::msg::Image`），
+以固定频率（默认 **16.6Hz**）把最新一帧保存为 PNG，便于拷贝回 PC 查看。
+
+真机（已在 K1 上实测）：
+
+| 项目 | 值 |
+|------|----|
+| DDS topic | `rt/boostercamera/head/depth` |
+| encoding | `mono16`（uint16，毫米；相机目录 `depth_scale = 0.001`） |
+| 分辨率 / step | 544×448 / 1088 |
+| 源帧率 | ≈20Hz（因此 16.6Hz 采样可正常工作） |
+| DDS 配置 | `/opt/booster/config/dds_configs/single-board_configs/fastdds_profile.xml` |
+
+初始化方式与 `booster_deploy_cpp` 一致，由 `--real` / `--sim` 决定（默认 real）：
+
+| 模式 | DDS 初始化 | 默认 topic |
+|------|-----------|-----------|
+| `--real`（默认） | `InitWithConfigPath(0, fastdds_profile.xml)` | `rt/boostercamera/head/depth` |
+| `--sim` | `Init(1, "lo")` | `rt/depthimage`（mono8） |
+
+> 深度/RGB 话题必须用 profile 初始化：SDK 的 `Init(domain, iface)` 在 iface 非空时会
+> `use_builtin_transports=false`，只开一个绑定该网卡的 UDP transport，匹配不到
+> `booster_camera` 的 UDP+SHM 参与者（实测 `rt/boostercamera/head/depth`
+> matched=0、0 帧）；`InitWithConfigPath` 则 matched=1、≈20Hz。
+
+```bash
+# 真机（默认，也可显式 --real）
+./build/depth_recorder --out depth_frames
+
+# 仿真（booster_mujoco：domain 1 + lo + rt/depthimage）
+./build/depth_recorder --sim --out depth_frames
+
+# 录 300 帧（约 18 秒）后退出；mono16 额外保存 16 位原始深度
+./build/depth_recorder --out depth_frames --max-frames 300 --save-raw
+```
+
+输出：
+
+| 文件 | 说明 |
+|------|------|
+| `frame_000001_mono16.png` | 8 位灰度预览图（可直接打开） |
+| `frame_000001_mono16_raw.png` | `--save-raw` 时的 16 位原始深度 |
+| `frames.csv` | 帧号、文件名、消息时间戳、分辨率、编码、最小/最大/平均深度 |
+
+支持的编码与处理方式：
+
+- `mono8` / `8UC1`：直接保存原始像素（仿真的深度图已是归一化 mono8）。
+- `16UC1` / `mono16`：按 `--depth-scale`（默认 `0.001`，即毫米）换算成米，
+  再按 `--min-depth`/`--max-depth`（默认 0.1–3.0m）固定区间映射为 8 位预览。
+- `32FC1`：按米处理，映射方式同上。
+
+首帧会打印实际收到的 encoding/分辨率，例如：
+
+```
+[depth_recorder] first frame: encoding='mono16', 544x448, step=1088, bigendian=0
+                 -> raw pixels are uint16 (scale 0.001 to meters)
+```
+
+常用参数见 `./build/depth_recorder -h`。程序按 Ctrl-C 正常退出并刷新 `frames.csv`。
 
 ## 注意
 
