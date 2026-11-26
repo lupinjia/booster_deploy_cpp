@@ -7,10 +7,11 @@
 //
 // Scripted phases (state machine flow mirrors go2_deploy):
 //   phase 1 (3s):  START button press        -> deploy starts control loop
-//   phase 2 (3s):  LB + RT                   -> state machine STAND
+//   phase 2 (3s):  LB + B                    -> state machine STAND
 //   phase 3 (2s):  LB + A                    -> state machine CTRL (policy active)
-//   phase 4 (10s): ramp vx (left stick up)   -> velocity command
-//   phase 5 (3s):  LB + Y                    -> STOP (damping)
+//   phase 4 (0.5s): RT press                 -> speed gear 2 (higher max vx)
+//   phase 5 (10s): ramp vx (left stick up)   -> velocity command
+//   phase 6 (3s):  LB + Y                    -> STOP (damping)
 
 #include <chrono>
 #include <cstdio>
@@ -49,7 +50,7 @@ int main(int argc, char **argv)
     std::printf("[virtual_remote] publishing on %s (interface %s)\n", TOPIC_REMOTE, interface.c_str());
 
     const int TICK_MS = 20;
-    enum Phase { PHASE_IDLE, PHASE_START, PHASE_STAND, PHASE_CTRL, PHASE_RAMP, PHASE_STOP };
+    enum Phase { PHASE_IDLE, PHASE_START, PHASE_STAND, PHASE_CTRL, PHASE_GEAR2, PHASE_RAMP, PHASE_STOP };
     auto phase_start = std::chrono::steady_clock::now();
     Phase phase = PHASE_IDLE;
 
@@ -66,13 +67,16 @@ int main(int argc, char **argv)
             if (elapsed > 12000) { phase = PHASE_START; phase_start = std::chrono::steady_clock::now(); std::printf("[virtual_remote] START\n"); }
             break;
         case PHASE_START:
-            if (elapsed > 1500) { phase = PHASE_STAND; phase_start = std::chrono::steady_clock::now(); std::printf("[virtual_remote] LB+RT (STAND)\n"); }
+            if (elapsed > 1500) { phase = PHASE_STAND; phase_start = std::chrono::steady_clock::now(); std::printf("[virtual_remote] LB+B (STAND)\n"); }
             break;
         case PHASE_STAND:
             if (elapsed > 3000) { phase = PHASE_CTRL; phase_start = std::chrono::steady_clock::now(); std::printf("[virtual_remote] LB+A (CTRL)\n"); }
             break;
         case PHASE_CTRL:
-            if (elapsed > 2000) { phase = PHASE_RAMP; phase_start = std::chrono::steady_clock::now(); std::printf("[virtual_remote] velocity ramp\n"); }
+            if (elapsed > 2000) { phase = PHASE_GEAR2; phase_start = std::chrono::steady_clock::now(); std::printf("[virtual_remote] RT (speed gear 2)\n"); }
+            break;
+        case PHASE_GEAR2:
+            if (elapsed > 500) { phase = PHASE_RAMP; phase_start = std::chrono::steady_clock::now(); std::printf("[virtual_remote] velocity ramp\n"); }
             break;
         case PHASE_RAMP:
             if (elapsed > 10000) { phase = PHASE_STOP; phase_start = std::chrono::steady_clock::now(); std::printf("[virtual_remote] LB+Y (STOP)\n"); }
@@ -84,8 +88,9 @@ int main(int argc, char **argv)
 
         set_all_false(msg);
         if (phase == PHASE_START) msg.start(true);
-        else if (phase == PHASE_STAND) { msg.lb(true); msg.rt(true); }
+        else if (phase == PHASE_STAND) { msg.lb(true); msg.b(true); }
         else if (phase == PHASE_CTRL) { msg.lb(true); msg.a(true); }
+        else if (phase == PHASE_GEAR2) { msg.rt(true); }
         else if (phase == PHASE_RAMP)
         {
             msg.ly(0.1f * (ticks % 20 + 1) / 2.f);

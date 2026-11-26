@@ -3,7 +3,7 @@
 # scale, observation terms/scales/history) are read from the ONNX metadata at
 # runtime; only the values below are supplied here.
 
-policy_name: "k1_walk_amp.onnx"  # relative to ../models or absolute path
+policy_name: "2026-11-25_23-03-41.onnx"  # relative to ../models or absolute path
 dt: 0.02                                           # policy control period (s), 50Hz
 
 # PD gains for the DAMPING -> STAND transition state
@@ -14,6 +14,12 @@ stand_kd: 5.0
 # joint_stiffness/joint_damping when present)
 ctrl_kp: 20.0
 ctrl_kd: 0.5
+
+# CTRL-state fall-safe: when enabled, a large body tilt (projected gravity
+# z > -0.1, i.e. tilted > ~84 deg / basically fallen) automatically stops the
+# policy and returns to DAMPING. Set to false to keep running the policy even
+# when the robot is tilted (e.g. for debugging / recovery experiments).
+enable_fall_safe: false
 
 # Policy-rate data log (50Hz, DataTamer MCAP). Records t, inference_time,
 # joint_pos/joint_vel/feedback_torque, root_* , dof_targets, obs, action.
@@ -28,3 +34,17 @@ remote_controller_topic: "rt/remote_controller_state"  # gamepad state topic (si
 # Real-robot local joystick device (used when running with an argument,
 # i.e. real robot; sim mode still subscribes to remote_controller_topic)
 joystick_device: "/dev/input/js0"
+
+# Velocity command mapping from the normalized ([-1, 1]) gamepad sticks.
+#   - x (left stick up/down) is scaled by vx_max of the active speed gear;
+#     RT selects gear 2 (higher max), RB selects gear 1 (lower max).
+#   - y (left stick left/right) and yaw (right stick) are independent of the
+#     gear and use their own range [min, max].
+velocity_command:
+  gear1_max_vx: 1.0   # gear 1 x-velocity cap (m/s), used as +/- range
+  gear2_max_vx: 2.0   # gear 2 x-velocity cap (m/s), used as +/- range
+  vx_min: -0.5        # global x-velocity lower bound (m/s), applied in every gear
+  vy_min: 0.0         # lateral velocity lower bound (m/s)
+  vy_max: 0.0         # lateral velocity upper bound (m/s)
+  vyaw_min: -1.0      # yaw rate lower bound (rad/s)
+  vyaw_max: 1.0       # yaw rate upper bound (rad/s)

@@ -61,6 +61,28 @@ public:
 
         last_action_.assign(num_policy_joints_, 0.f);
         command_.assign(3, 0.f);
+
+        // sanity-check the metadata layout against the model input size
+        if (!metadata_.actor_flatten_history_dim)
+        {
+            std::cerr << "[obs_builder] only flatten_history_dim=true is "
+                         "supported by this deployment pipeline" << std::endl;
+            std::abort();
+        }
+        int expected_dim = 0;
+        for (const auto &name : metadata_.observation_names)
+        {
+            const ObservationTermCfg *cfg = metadata_.term(name);
+            int history = cfg->history_length > 0 ? cfg->history_length : 1;
+            expected_dim += term_dim(name) * history;
+        }
+        if (expected_dim != metadata_.actor_obs_dim)
+        {
+            std::cerr << "[obs_builder] observation layout size " << expected_dim
+                      << " (terms x history) != model actor_obs_dim "
+                      << metadata_.actor_obs_dim << std::endl;
+            std::abort();
+        }
     }
 
     void reset()

@@ -20,8 +20,11 @@ C++ 策略部署程序，将 mjlab 导出的 ONNX 运动策略部署到 Booster 
 
 | 模型文件 | 训练方式 | 部署效果 |
 |----------|----------|----------|
-| `k1_walk_vanilla.onnx` | 普通 RL（仅策略奖励） | 基础行走 |
-| `k1_walk_amp.onnx` | RL + AMP（对抗运动先验） | 更自然的行走步态 |
+| `2026-11-23_20-28-05_amp_flat_run_recovery.onnx` | RL + AMP（对抗运动先验） | AMP 行走 / 平地恢复 |
+
+> **metadata 格式**：当前代码只支持新版 mjlab 导出格式（`obs_group.<input>.*`
+> 与 `onnx_input_*` / `onnx_output_*`）。旧格式模型（如 `k1_walk_vanilla.onnx`、
+> `k1_walk_amp.onnx`）会因缺少 `onnx_input_names` 等字段在加载时报错退出。
 
 实机部署效果：
 
@@ -37,7 +40,7 @@ booster_deploy_cpp/
 │   ├── robot_controller.hpp      # 框架：DDS 通道 + 状态机 + 50Hz/500Hz 周期任务
 │   ├── robot_interface.hpp       # 从 booster LowState 提取状态（关节/IMU/重力投影）
 │   ├── user_controller.hpp       # BasicUserController 接口 + K1OnnxController（ORT 推理）
-│   ├── onnx_metadata.hpp         # ONNX metadata 解析（booster_deploy/onnx_metadata.py 的 C++ 移植）
+│   ├── onnx_metadata.hpp         # ONNX metadata 解析（mjlab obs_group/onnx_* 导出格式）
 │   ├── observation_builder.hpp   # 观测构建器（observation_builder.py 的 C++ 移植）
 │   ├── gamepad.hpp               # 手柄状态抽象（平滑/死区/按键边沿检测）
 │   ├── local_joystick.hpp        # 真机模式：直接读本地 /dev/input/jsX 手柄设备
@@ -126,11 +129,17 @@ DDS 初始化方式由位置参数决定（默认 real）：
 | 按键 | 功能 |
 |------|------|
 | START | 启动控制循环 |
-| LB + RT | 站立 STAND |
+| LB + B | 站立 STAND |
 | LB + A | 进入策略控制 CTRL |
 | LB + Y | 停止（阻尼） |
+| RT | 切换速度档位到二档（x 速度上限更大） |
+| RB | 切换速度档位到一档（x 速度上限更小） |
 
-左摇杆前后/左右控制 vx/vy，右摇杆控制 vyaw。
+左摇杆前后/左右控制 vx/vy，右摇杆控制 vyaw。x 方向速度上限由当前档位决定
+（`velocity_command.gear1_max_vx` / `gear2_max_vx`），且所有档位下 x 命令都会被
+`velocity_command.vx_min` 从下方 clip（即 `vx = max(vx, vx_min)`）；y 方向与 yaw
+不受档位影响，分别使用 `velocity_command.vy_min/max`、`vyaw_min/max` 映射（摇杆值
+归一化为 [-1, 1]）。默认从一档开始。
 
 ## 从 ONNX metadata 自动读取的参数
 
@@ -138,9 +147,16 @@ DDS 初始化方式由位置参数决定（默认 real）：
 - `joint_stiffness` / `joint_damping`：CTRL 状态逐关节 PD 增益
 - `default_joint_pos`：站立基准位姿（`stand_pos`）
 - `action_scale`：动作缩放（逐关节）
-- `observation_names` / `obs_scale.<term>` / `observation_terms_clip` /
-  `observation_terms_history_length`：观测管道参数
-- `actor_obs_dim` / `actor_history_length`：观测维度与历史帧数
+- `onnx_input_names` / `onnx_input_shapes` / `onnx_input_groups`：推理输入名、
+  形状与分组（取 `actor` 组作为策略输入，输入维度由形状推导）
+- `onnx_output_names` / `onnx_output_shapes`：推理输出名与动作维度
+- `obs_group.<input>.term_names` / `term_scales` / `term_clips` /
+  `term_history_lengths`：观测项及其缩放、裁剪、历史长度
+- `obs_group.<input>.history_length` / `flatten_history_dim`：观测历史帧数与
+  展平方式（当前仅支持 `flatten_history_dim=true`）
+
+旧格式字段（`observation_names`、`obs_scale.<term>`、`observation_terms_*`、
+`actor_obs_dim`、`actor_history_length`、`command_names`）不再解析。
 
 `params/k1_config.yaml` 仅需提供模型路径（`policy_name`）、控制周期（`dt`）、
 过渡 PD 增益、DDS 参数和真机手柄设备路径（`joystick_device`）。
@@ -230,4 +246,6 @@ cd booster_deploy_cpp/build
 
 - 仿真中机器人从零位姿启动会自然倒下（与 unitree_mujoco 的 go2 行为一致），
   请在机器人站立时尽快进入 CTRL；倒地后安全回退（fall-safe）会自动切回阻尼状态。
+  该检测可通过 `params/k1_config.yaml` 的 `enable_fall_safe`（默认 `true`）关闭：
+  CTRL 状态下机身倾斜超过约 84°（重力投影 z > -0.1）时自动 Stop 并进入 DAMPING。
 - 手柄边缘检测在控制率（50Hz）下进行（`Gamepad::tick`），帧回调只刷新原始状态。

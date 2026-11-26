@@ -290,11 +290,12 @@ private:
 
     void UpdateStateMachine()
     {
-        // L1 + R2 -> Stand
+        // L1 + B  -> Stand
         // L1 + A  -> Ctrl
         // L1 + Y  -> Stop
+        // RT / RB -> speed gear up / down (handled in the policy GetInput)
         auto &g = gamepad_;
-        if (g.rt.on_press && g.lb.pressed)
+        if (g.b.on_press && g.lb.pressed)
         {
             if (state_machine_.Stand()) StandCallback();
         }
@@ -332,7 +333,7 @@ private:
         else if (state_machine_.state == STATES::CTRL)
         {
             UserControlStep(true);
-            if (CheckTermination())
+            if (ctrl_->enable_fall_safe() && CheckTermination())
             {
                 state_machine_.Stop();
                 Damping();

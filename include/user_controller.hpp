@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -40,6 +42,9 @@ public:
     virtual const std::vector<float> &kp() const = 0;
     virtual const std::vector<float> &kd() const = 0;
     virtual const std::vector<float> &stand_pos_real() const = 0;
+
+    // whether the CTRL-state fall-safe (auto return to DAMPING on tilt) is on
+    virtual bool enable_fall_safe() const = 0;
 
     // last policy step outputs (for data logging; empty until first Calculate)
     virtual const std::vector<float> &last_obs() const = 0;
@@ -85,6 +90,20 @@ public:
             stand_kd_ = cfg["stand_kd"].as<float>();
             ctrl_kp_fallback_ = cfg["ctrl_kp"].as<float>();
             ctrl_kd_fallback_ = cfg["ctrl_kd"].as<float>();
+            if (cfg["enable_fall_safe"])
+            {
+                enable_fall_safe_ = cfg["enable_fall_safe"].as<bool>();
+            }
+            if (auto vc = cfg["velocity_command"])
+            {
+                if (vc["gear1_max_vx"]) vx_gear1_ = vc["gear1_max_vx"].as<float>();
+                if (vc["gear2_max_vx"]) vx_gear2_ = vc["gear2_max_vx"].as<float>();
+                if (vc["vx_min"]) vx_min_ = vc["vx_min"].as<float>();
+                if (vc["vy_min"]) vy_min_ = vc["vy_min"].as<float>();
+                if (vc["vy_max"]) vy_max_ = vc["vy_max"].as<float>();
+                if (vc["vyaw_min"]) vyaw_min_ = vc["vyaw_min"].as<float>();
+                if (vc["vyaw_max"]) vyaw_max_ = vc["vyaw_max"].as<float>();
+            }
         }
         catch (const std::exception &e)
         {
@@ -122,12 +141,9 @@ public:
         }
         metadata_->print_summary();
 
-        // policy input/output names
-        Ort::AllocatorWithDefaultOptions allocator;
-        auto input_name = session_->GetInputNameAllocated(0, allocator);
-        auto output_name = session_->GetOutputNameAllocated(0, allocator);
-        input_name_ = input_name.get();
-        output_name_ = output_name.get();
+        // policy input/output names (from the exported onnx_* metadata)
+        input_name_ = metadata_->input_name;
+        output_name_ = metadata_->output_name;
 
         // ---- robot interface + obs builder ----
         robot_ = std::make_unique<BoosterRobotInterface>(robot_joint_names_);
@@ -160,6 +176,8 @@ public:
         std::cout << "[k1_onnx] policy loaded: " << policy_file
                   << "  (input: " << input_name_ << ", obs_dim=" << metadata_->actor_obs_dim
                   << ", output: " << output_name_ << ")" << std::endl;
+        std::cout << "[k1_onnx] ctrl fall-safe: "
+                  << (enable_fall_safe_ ? "enabled" : "disabled") << std::endl;
     }
 
     void reset(BoosterRobotInterface &robot) override
@@ -172,11 +190,29 @@ public:
     void GetInput(BoosterRobotInterface &robot, Gamepad &gamepad) override
     {
         (void)robot;  // state is read from the shared robot interface
-        // velocity command from gamepad (same convention as go2_deploy /
-        // booster remote_control_service)
-        obs_builder_->command_[0] = -gamepad.ly;
-        obs_builder_->command_[1] = -gamepad.lx;
-        obs_builder_->command_[2] = -gamepad.rx;
+        // speed gear: RT -> gear 2 (faster), RB -> gear 1
+        if (gamepad.rt.on_press && speed_gear_ != 1)
+        {
+            speed_gear_ = 1;
+            std::cout << "[k1_onnx] speed gear 2 (max_vx=" << vx_gear2_ << ")" << std::endl;
+        }
+        if (gamepad.rb.on_press && speed_gear_ != 0)
+        {
+            speed_gear_ = 0;
+            std::cout << "[k1_onnx] speed gear 1 (max_vx=" << vx_gear1_ << ")" << std::endl;
+        }
+
+        // gamepad axes are normalized to [-1, 1]; map them to the configured
+        // velocity ranges.  vx depends on the active gear (symmetric +/- max),
+        // while vy / vyaw are gear-independent and use their own per-side range.
+        const float max_vx = (speed_gear_ == 1) ? vx_gear2_ : vx_gear1_;
+        const float vx_axis = -gamepad.ly;
+        const float vy_axis = -gamepad.lx;
+        const float vyaw_axis = -gamepad.rx;
+
+        obs_builder_->command_[0] = std::max(vx_axis * max_vx, vx_min_);
+        obs_builder_->command_[1] = (vy_axis >= 0.f) ? vy_axis * vy_max_ : vy_axis * std::fabs(vy_min_);
+        obs_builder_->command_[2] = (vyaw_axis >= 0.f) ? vyaw_axis * vyaw_max_ : vyaw_axis * std::fabs(vyaw_min_);
     }
 
     void Calculate() override
@@ -199,7 +235,6 @@ public:
         // ---- inference ----
         auto mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         std::vector<int64_t> input_shape{1, metadata_->actor_obs_dim};
-        std::vector<int64_t> output_shape{1, metadata_->num_joints()};
         Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
             mem, obs.data(), obs.size(), input_shape.data(), input_shape.size());
 
@@ -221,7 +256,6 @@ public:
         {
             jpos_des[meta2real[i]] += actions_[i] * action_scale_[i];
         }
-        (void)output_shape;
     }
 
     // apply a zero-observation warmup inference
@@ -244,6 +278,7 @@ public:
     float stand_kp() const override { return stand_kp_; }
     float stand_kd() const override { return stand_kd_; }
     const std::vector<float> &stand_pos_real() const override { return stand_pos_real_; }
+    bool enable_fall_safe() const override { return enable_fall_safe_; }
 
     BoosterRobotInterface &robot() override { return *robot_; }
     const std::vector<float> &last_obs() const override { return last_obs_; }
@@ -257,6 +292,14 @@ private:
     std::string policy_name_;
     float stand_kp_ = 60.f, stand_kd_ = 5.f;
     float ctrl_kp_fallback_ = 20.f, ctrl_kd_fallback_ = 0.5f;
+    bool enable_fall_safe_ = true;
+
+    // velocity command mapping (gamepad axes are normalized to [-1, 1])
+    float vx_gear1_ = 1.0f, vx_gear2_ = 1.0f;  // x speed cap per gear
+    float vx_min_ = -std::numeric_limits<float>::infinity();  // global x lower bound
+    float vy_min_ = -1.0f, vy_max_ = 1.0f;     // lateral velocity range
+    float vyaw_min_ = -1.0f, vyaw_max_ = 1.0f; // yaw-rate range
+    int speed_gear_ = 0;                        // 0 -> gear 1, 1 -> gear 2
 
     std::unique_ptr<Ort::Env> env_;
     std::unique_ptr<Ort::Session> session_;
