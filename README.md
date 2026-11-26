@@ -14,17 +14,18 @@ C++ 策略部署程序，将 mjlab 导出的 ONNX 运动策略部署到 Booster 
 
 ## 策略模型与部署效果
 
-`models/` 下每个 ONNX 文件对应一种训练效果，**只需修改
-`params/k1_config.yaml` 的 `policy_name` 指向不同模型即可切换**（控制周期、
-观测/PD 参数等均由模型 metadata 自动解析，无需其他配置）：
+`params/k1_config.yaml` 的 `policy_name` 指定要部署的模型（控制周期、观测/PD
+参数等均由模型 metadata 自动解析，无需其他配置）：
 
 | 模型文件 | 训练方式 | 部署效果 |
 |----------|----------|----------|
-| `2026-11-23_20-28-05_amp_flat_run_recovery.onnx` | RL + AMP（对抗运动先验） | AMP 行走 / 平地恢复 |
+| `k1_walk_vanilla.onnx` | 普通 RL（仅策略奖励） | 基础行走 |
+| `k1_walk_amp.onnx` | RL + AMP（对抗运动先验） | 更自然的 AMP 行走步态 |
+| `k1_walk_run_recovery.onnx` | RL + AMP（对抗运动先验） | 行走、奔跑、平地恢复 |
 
 > **metadata 格式**：当前代码只支持新版 mjlab 导出格式（`obs_group.<input>.*`
-> 与 `onnx_input_*` / `onnx_output_*`）。旧格式模型（如 `k1_walk_vanilla.onnx`、
-> `k1_walk_amp.onnx`）会因缺少 `onnx_input_names` 等字段在加载时报错退出。
+> 与 `onnx_input_*` / `onnx_output_*`）；用旧格式导出的模型会因缺少
+> `onnx_input_names` 等字段在加载时报错退出。
 
 实机部署效果：
 
@@ -158,8 +159,11 @@ DDS 初始化方式由位置参数决定（默认 real）：
 旧格式字段（`observation_names`、`obs_scale.<term>`、`observation_terms_*`、
 `actor_obs_dim`、`actor_history_length`、`command_names`）不再解析。
 
-`params/k1_config.yaml` 仅需提供模型路径（`policy_name`）、控制周期（`dt`）、
-过渡 PD 增益、DDS 参数和真机手柄设备路径（`joystick_device`）。
+`params/k1_config.yaml` 提供模型路径（`policy_name`）、控制周期（`dt`）、过渡
+PD 增益、CTRL 逐关节增益回退值（`ctrl_kp` / `ctrl_kd`）、fall-safe 开关
+（`enable_fall_safe`）、速度命令映射（`velocity_command`：两档 x 速度上限、
+`vx_min` 下限以及 y/yaw 的 min/max）、DDS 参数和真机手柄设备路径
+（`joystick_device`）。
 
 ## 集成测试（无手柄）
 
